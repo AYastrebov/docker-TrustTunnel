@@ -3,12 +3,12 @@ name: Build and Publish Docker Image
 on:
   push:
     branches:
-      - main
+      - master
     tags:
       - 'v*'
   pull_request:
     branches:
-      - main
+      - master
   workflow_dispatch:
     inputs:
       trusttunnel_version:
@@ -84,7 +84,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
             type=raw,value=${{ needs.check-release.outputs.version }}
             type=semver,pattern={{version}},value=v${{ needs.check-release.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=v${{ needs.check-release.outputs.version }}
