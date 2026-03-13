@@ -1,4 +1,4 @@
-FROM ghcr.io/linuxserver/baseimage-ubuntu:noble AS base
+FROM ghcr.io/linuxserver/baseimage-alpine:3.21
 
 ARG BUILD_DATE
 ARG VERSION
@@ -10,19 +10,15 @@ ARG TARGETARCH
 
 RUN \
   echo "**** install runtime packages ****" && \
-  apt-get update && \
-  apt-get install -y --no-install-recommends \
+  apk add --no-cache \
     ca-certificates \
     curl \
     iproute2 \
     iptables \
-    iputils-ping \
+    ip6tables \
+    iputils \
     jq \
-    net-tools \
-    openresolv \
-    procps \
-    tar \
-    wget && \
+    net-tools && \
   echo "**** download TrustTunnel endpoint ****" && \
   if [ -z "${TRUSTTUNNEL_VERSION}" ]; then \
     TRUSTTUNNEL_VERSION=$(curl -s https://api.github.com/repos/TrustTunnel/TrustTunnel/releases/latest | jq -r '.tag_name' | sed 's/^v//'); \
@@ -36,25 +32,18 @@ RUN \
   curl -fsSL "https://github.com/TrustTunnel/TrustTunnel/releases/download/v${TRUSTTUNNEL_VERSION}/trusttunnel-v${TRUSTTUNNEL_VERSION}-linux-${TT_ARCH}.tar.gz" \
     -o /tmp/trusttunnel-endpoint.tar.gz && \
   tar -xzf /tmp/trusttunnel-endpoint.tar.gz -C /tmp/ && \
-  install -m 755 /tmp/trusttunnel_endpoint /usr/local/bin/trusttunnel_endpoint && \
-  install -m 755 /tmp/setup_wizard /usr/local/bin/trusttunnel_setup_wizard && \
+  install -m 755 /tmp/trusttunnel-v${TRUSTTUNNEL_VERSION}-linux-${TT_ARCH}/trusttunnel_endpoint /usr/local/bin/trusttunnel_endpoint && \
+  install -m 755 /tmp/trusttunnel-v${TRUSTTUNNEL_VERSION}-linux-${TT_ARCH}/setup_wizard /usr/local/bin/trusttunnel_setup_wizard && \
   echo "**** download TrustTunnel client ****" && \
   TTCLIENT_VERSION=$(curl -s https://api.github.com/repos/TrustTunnel/TrustTunnelClient/releases/latest | jq -r '.tag_name' | sed 's/^v//') && \
   echo "Downloading TrustTunnel client v${TTCLIENT_VERSION} for ${TT_ARCH}" && \
-  curl -fsSL "https://github.com/TrustTunnel/TrustTunnelClient/releases/download/v${TTCLIENT_VERSION}/trusttunnel-client-v${TTCLIENT_VERSION}-linux-${TT_ARCH}.tar.gz" \
+  curl -fsSL "https://github.com/TrustTunnel/TrustTunnelClient/releases/download/v${TTCLIENT_VERSION}/trusttunnel_client-v${TTCLIENT_VERSION}-linux-${TT_ARCH}.tar.gz" \
     -o /tmp/trusttunnel-client.tar.gz && \
   tar -xzf /tmp/trusttunnel-client.tar.gz -C /tmp/ && \
-  install -m 755 /tmp/trusttunnel_client /usr/local/bin/trusttunnel_client && \
-  if [ -f /tmp/setup_wizard ]; then \
-    install -m 755 /tmp/setup_wizard /usr/local/bin/trusttunnel_client_setup_wizard; \
-  fi && \
+  install -m 755 /tmp/trusttunnel_client-v${TTCLIENT_VERSION}-linux-${TT_ARCH}/trusttunnel_client /usr/local/bin/trusttunnel_client && \
+  install -m 755 /tmp/trusttunnel_client-v${TTCLIENT_VERSION}-linux-${TT_ARCH}/setup_wizard /usr/local/bin/trusttunnel_client_setup_wizard && \
   echo "**** cleanup ****" && \
-  apt-get autoremove -y && \
-  apt-get clean && \
-  rm -rf \
-    /tmp/* \
-    /var/lib/apt/lists/* \
-    /var/tmp/*
+  rm -rf /tmp/*
 
 COPY root/ /
 
