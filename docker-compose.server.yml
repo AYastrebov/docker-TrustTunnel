@@ -1,0 +1,29 @@
+services:
+  trusttunnel-server:
+    image: ghcr.io/ayastrebov/docker-trusttunnel:latest
+    container_name: trusttunnel-server
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - TT_MODE=server
+      - TT_HOSTNAME=vpn.example.com
+      - TT_CREDENTIALS=user1:password1
+      - TT_LISTEN_ADDRESS=0.0.0.0:8443
+      - TT_CERT_TYPE=self-signed  # self-signed | letsencrypt | provided
+      # - TT_ACME_EMAIL=admin@example.com  # required for letsencrypt
+      # - TT_ACME_STAGING=false
+      # - TT_CERT_CHAIN_PATH=/config/server/certs/fullchain.pem
+      # - TT_CERT_KEY_PATH=/config/server/certs/privkey.pem
+    volumes:
+      - trusttunnel-config:/config
+    ports:
+      - "443:8443/tcp"
+      - "443:8443/udp"
+      - "80:80/tcp"  # for Let's Encrypt HTTP-01 challenge
+    restart: unless-stopped
+
+volumes:
+  trusttunnel-config:

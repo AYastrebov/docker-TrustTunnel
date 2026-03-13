@@ -1,0 +1,41 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+MODE="${TT_RESOLVED_MODE}"
+
+if [[ "${MODE}" == "server" ]]; then
+    echo "**** Starting TrustTunnel endpoint (server) ****"
+
+    SERVER_DIR="/config/server"
+
+    # Build command arguments
+    ARGS=("${SERVER_DIR}/vpn.toml" "${SERVER_DIR}/hosts.toml")
+
+    if [[ -f "${SERVER_DIR}/rules.toml" ]]; then
+        ARGS+=("--rules" "${SERVER_DIR}/rules.toml")
+    fi
+
+    exec \
+        s6-notifyoncheck -d -n 300 -w 1000 -c "pgrep -x trusttunnel_end" \
+        trusttunnel_endpoint "${ARGS[@]}"
+
+elif [[ "${MODE}" == "client" ]]; then
+    echo "**** Starting TrustTunnel client ****"
+
+    CLIENT_DIR="/config/client"
+    CONFIG_FILE="${CLIENT_DIR}/trusttunnel_client.toml"
+
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        echo "**** ERROR: Client config not found at ${CONFIG_FILE} ****"
+        sleep 5
+        exit 1
+    fi
+
+    exec \
+        trusttunnel_client -c "${CONFIG_FILE}"
+
+else
+    echo "**** ERROR: Unknown mode '${MODE}' ****"
+    sleep 5
+    exit 1
+fi

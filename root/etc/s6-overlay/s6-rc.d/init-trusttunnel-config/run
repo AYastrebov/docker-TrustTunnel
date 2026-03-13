@@ -1,0 +1,204 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+echo "
+-------------------------------------
+   _____              _  _____                      _
+  |_   _| __ _   _ __| ||_   _|_   _ _ __  _ __   ___| |
+    | || '__| | | / __| __|| | | | | | '_ \| '_ \ / _ \ |
+    | || |  | |_| \__ \ |_ | | | |_| | | | | | | |  __/ |
+    |_||_|   \__,_|___/\__||_|  \__,_|_| |_|_| |_|\___|_|
+
+-------------------------------------
+"
+
+# Determine mode: server or client
+MODE="${TT_MODE:-auto}"
+
+if [[ "${MODE}" == "auto" ]]; then
+    if [[ -n "${TT_HOSTNAME}" ]]; then
+        MODE="server"
+    elif [[ -f /config/client/trusttunnel_client.toml ]]; then
+        MODE="client"
+    else
+        echo "**** No TT_HOSTNAME set and no client config found. ****"
+        echo "**** Set TT_HOSTNAME + TT_CREDENTIALS for server mode, ****"
+        echo "**** or provide /config/client/trusttunnel_client.toml for client mode. ****"
+        sleep 1
+        exit 1
+    fi
+fi
+
+echo "**** TrustTunnel mode: ${MODE} ****"
+
+# Save mode to s6 container environment for other services
+printf "%s" "${MODE}" > /run/s6/container_environment/TT_RESOLVED_MODE
+
+if [[ "${MODE}" == "server" ]]; then
+    # ------- SERVER MODE -------
+    echo "**** Configuring TrustTunnel endpoint (server) ****"
+
+    SERVER_DIR="/config/server"
+    mkdir -p "${SERVER_DIR}/certs"
+
+    LISTEN_ADDRESS="${TT_LISTEN_ADDRESS:-0.0.0.0:8443}"
+    CERT_TYPE="${TT_CERT_TYPE:-self-signed}"
+
+    # Check if config already exists
+    if [[ -f "${SERVER_DIR}/vpn.toml" && -f "${SERVER_DIR}/hosts.toml" && -f "${SERVER_DIR}/credentials.toml" ]]; then
+        echo "**** Existing server configuration found ****"
+
+        # Check if credentials need updating
+        if [[ -n "${TT_CREDENTIALS}" ]]; then
+            echo "**** Regenerating credentials.toml from TT_CREDENTIALS ****"
+            > "${SERVER_DIR}/credentials.toml"
+            IFS=',' read -ra CRED_PAIRS <<< "${TT_CREDENTIALS}"
+            for pair in "${CRED_PAIRS[@]}"; do
+                IFS=':' read -r user pass <<< "${pair}"
+                if [[ -n "${user}" && -n "${pass}" ]]; then
+                    cat >> "${SERVER_DIR}/credentials.toml" <<CREDEOF
+
+[[credentials]]
+username = "${user}"
+password = "${pass}"
+CREDEOF
+                fi
+            done
+        fi
+    else
+        echo "**** Generating new server configuration ****"
+
+        if [[ -z "${TT_HOSTNAME}" ]]; then
+            echo "**** ERROR: TT_HOSTNAME is required for server mode ****"
+            exit 1
+        fi
+
+        if [[ -z "${TT_CREDENTIALS}" ]]; then
+            echo "**** ERROR: TT_CREDENTIALS is required for server mode ****"
+            echo "**** Format: user1:pass1,user2:pass2 ****"
+            exit 1
+        fi
+
+        # Generate vpn.toml
+        cat > "${SERVER_DIR}/vpn.toml" <<VPNEOF
+listen_address = "${LISTEN_ADDRESS}"
+
+[timeouts]
+connect_timeout_sec = 5
+idle_timeout_sec = 300
+
+[protocols]
+enable_http1 = true
+enable_http2 = true
+enable_quic = true
+
+[forward_protocol]
+type = "direct"
+
+[icmp]
+enable = false
+VPNEOF
+
+        # Generate hosts.toml based on cert type
+        case "${CERT_TYPE}" in
+            self-signed)
+                cat > "${SERVER_DIR}/hosts.toml" <<HOSTSEOF
+[[main_hosts]]
+hostname = "${TT_HOSTNAME}"
+
+[main_hosts.tls]
+type = "self-signed"
+HOSTSEOF
+                ;;
+            letsencrypt)
+                ACME_EMAIL="${TT_ACME_EMAIL:-}"
+                ACME_STAGING="${TT_ACME_STAGING:-false}"
+                if [[ -z "${ACME_EMAIL}" ]]; then
+                    echo "**** ERROR: TT_ACME_EMAIL is required for Let's Encrypt ****"
+                    exit 1
+                fi
+                cat > "${SERVER_DIR}/hosts.toml" <<HOSTSEOF
+[[main_hosts]]
+hostname = "${TT_HOSTNAME}"
+
+[main_hosts.tls]
+type = "letsencrypt"
+email = "${ACME_EMAIL}"
+staging = ${ACME_STAGING}
+HOSTSEOF
+                ;;
+            provided)
+                CERT_CHAIN="${TT_CERT_CHAIN_PATH:-/config/server/certs/fullchain.pem}"
+                CERT_KEY="${TT_CERT_KEY_PATH:-/config/server/certs/privkey.pem}"
+                cat > "${SERVER_DIR}/hosts.toml" <<HOSTSEOF
+[[main_hosts]]
+hostname = "${TT_HOSTNAME}"
+
+[main_hosts.tls]
+type = "provided"
+cert_chain_path = "${CERT_CHAIN}"
+key_path = "${CERT_KEY}"
+HOSTSEOF
+                ;;
+        esac
+
+        # Generate credentials.toml
+        > "${SERVER_DIR}/credentials.toml"
+        IFS=',' read -ra CRED_PAIRS <<< "${TT_CREDENTIALS}"
+        for pair in "${CRED_PAIRS[@]}"; do
+            IFS=':' read -r user pass <<< "${pair}"
+            if [[ -n "${user}" && -n "${pass}" ]]; then
+                cat >> "${SERVER_DIR}/credentials.toml" <<CREDEOF
+
+[[credentials]]
+username = "${user}"
+password = "${pass}"
+CREDEOF
+            fi
+        done
+
+        # Generate optional rules.toml
+        if [[ -n "${TT_RULES}" ]]; then
+            cp "${TT_RULES}" "${SERVER_DIR}/rules.toml"
+        fi
+
+        echo "**** Server configuration generated in ${SERVER_DIR} ****"
+    fi
+
+    # Set ownership
+    lsiown -R abc:abc "${SERVER_DIR}"
+
+elif [[ "${MODE}" == "client" ]]; then
+    # ------- CLIENT MODE -------
+    echo "**** Configuring TrustTunnel client ****"
+
+    CLIENT_DIR="/config/client"
+    mkdir -p "${CLIENT_DIR}"
+
+    if [[ ! -f "${CLIENT_DIR}/trusttunnel_client.toml" ]]; then
+        if [[ -n "${TT_CLIENT_CONFIG}" ]]; then
+            echo "**** Writing client config from TT_CLIENT_CONFIG env var ****"
+            echo "${TT_CLIENT_CONFIG}" > "${CLIENT_DIR}/trusttunnel_client.toml"
+        elif [[ -n "${TT_DEEPLINK}" ]]; then
+            echo "**** Generating client config from deep-link URI ****"
+            if command -v trusttunnel_client_setup_wizard &>/dev/null; then
+                trusttunnel_client_setup_wizard --deeplink "${TT_DEEPLINK}" --output "${CLIENT_DIR}/trusttunnel_client.toml"
+            else
+                echo "**** ERROR: setup_wizard not available for deep-link conversion ****"
+                exit 1
+            fi
+        else
+            echo "**** ERROR: No client config found. ****"
+            echo "**** Either mount a config at /config/client/trusttunnel_client.toml ****"
+            echo "**** or set TT_CLIENT_CONFIG or TT_DEEPLINK environment variable. ****"
+            exit 1
+        fi
+    else
+        echo "**** Existing client configuration found ****"
+    fi
+
+    # Set ownership
+    lsiown -R abc:abc "${CLIENT_DIR}"
+fi
+
+echo "**** TrustTunnel init complete (mode: ${MODE}) ****"

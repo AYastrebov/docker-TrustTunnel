@@ -1,0 +1,29 @@
+services:
+  trusttunnel-client:
+    image: ghcr.io/ayastrebov/docker-trusttunnel:latest
+    container_name: trusttunnel-client
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      - TT_MODE=client
+      # Option 1: Mount a config file (preferred)
+      # Option 2: Pass config via env var
+      # - TT_CLIENT_CONFIG=<toml content>
+      # Option 3: Pass deep-link URI
+      # - TT_DEEPLINK=tt://...
+    volumes:
+      - trusttunnel-client-config:/config
+      # Mount your client config:
+      # - ./trusttunnel_client.toml:/config/client/trusttunnel_client.toml:ro
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv6.conf.all.disable_ipv6=0
+    restart: unless-stopped
+
+volumes:
+  trusttunnel-client-config:

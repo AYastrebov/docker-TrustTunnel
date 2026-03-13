@@ -1,0 +1,9 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+MODE="${TT_RESOLVED_MODE}"
+
+echo "**** TrustTunnel (${MODE}) service stopped ****"
+
+# If the service exits unexpectedly, give a brief delay before s6 restarts it
+sleep 1
